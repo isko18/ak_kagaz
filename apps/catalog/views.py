@@ -1,6 +1,4 @@
-# views.py
 from django.db.models import Prefetch
-from rest_framework import viewsets
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,7 +7,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
-from .models import Product, ProductImage, Category
+from .models import Product, ProductImage, Category, Characteristics
 from .serializers import (
     ProductListSerializer,
     ProductDetailSerializer,
@@ -49,13 +47,17 @@ class CategoryViewSet(ReadOnlyModelViewSet):
     """
     GET /categories/       -> список категорий (плоский)
     GET /categories/tree/  -> дерево категорий
-    GET /categories/{id}/  -> детальная категория
+    GET /categories/{slug}/  -> детальная категория по slug
     """
 
     queryset = Category.objects.filter(is_active=True).order_by("tree_id", "lft")
     serializer_class = CategorySerializer
     filter_backends = [SearchFilter]
     search_fields = ("name", "slug")
+
+    # 👇 деталь по slug, а не по id
+    lookup_field = "slug"
+    lookup_url_kwarg = "slug"
 
     @action(detail=False, methods=["get"], url_path="tree")
     def tree(self, request, *args, **kwargs):
@@ -74,8 +76,8 @@ class CategoryViewSet(ReadOnlyModelViewSet):
 # ===== товары =====
 class ProductViewSet(ReadOnlyModelViewSet):
     """
-    GET /products/        -> быстрый список (лайт-данные, 1 картинка)
-    GET /products/{id}/   -> детальная карточка
+    GET /products/          -> быстрый список (лайт-данные, 1 картинка)
+    GET /products/{slug}/   -> детальная карточка по slug
     """
 
     pagination_class = ProductPagination
@@ -90,12 +92,17 @@ class ProductViewSet(ReadOnlyModelViewSet):
     )
     ordering = ("-created_at",)
 
+    # 👇 ключевая часть: деталь по slug
+    lookup_field = "slug"
+    lookup_url_kwarg = "slug"
+
     def get_queryset(self):
         """
         Оптимизированный queryset:
         - select_related("category") — нет лишних запросов по категории
-        - only(...) — забираем только нужные поля
-        - префетч картинок разный для list и detail
+        - only(...) — забираем только нужные поля продукта
+        - list: префетчим только первую картинку (через to_attr="images_all")
+        - detail: префетчим все картинки и характеристики с key
         """
         base_qs = (
             Product.objects
@@ -131,12 +138,24 @@ class ProductViewSet(ReadOnlyModelViewSet):
                 Prefetch("images", queryset=images_qs, to_attr="images_all")
             )
         else:
-            # Для детальной карточки — все картинки
-            base_qs = base_qs.prefetch_related(
-                Prefetch(
-                    "images",
-                    queryset=ProductImage.objects.only("id", "image", "product"),
+            # Для детальной карточки — все картинки + характеристики с key
+            images_qs = ProductImage.objects.only("id", "image", "product")
+            chars_qs = (
+                Characteristics.objects
+                .select_related("key")
+                .only(
+                    "id",
+                    "product",
+                    "key",
+                    "value",
+                    "key__id",
+                    "key__title",
+                    "key__unit",
                 )
+            )
+            base_qs = base_qs.prefetch_related(
+                Prefetch("images", queryset=images_qs),
+                Prefetch("characteristics", queryset=chars_qs),
             )
 
         return base_qs

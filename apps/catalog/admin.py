@@ -1,9 +1,14 @@
-# admin.py
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 from mptt.admin import DraggableMPTTAdmin
 
-from .models import Category, Product, ProductImage
+from .models import (
+    Category,
+    Product,
+    ProductImage,
+    Characteristics,
+    CharacteristicsDict,
+)
 
 
 @admin.register(Category)
@@ -58,6 +63,17 @@ class ProductImageInline(admin.TabularInline):
     image_preview.short_description = "Превью"
 
 
+class CharacteristicsInline(admin.TabularInline):
+    """
+    Характеристики товара: редактируем прямо в карточке товара.
+    """
+    model = Characteristics
+    extra = 1
+    autocomplete_fields = ("key",)
+    fields = ("key", "value")
+    # если хочешь запретить добавление/удаление здесь – можно переопределить has_add/has_delete
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = (
@@ -69,7 +85,7 @@ class ProductAdmin(admin.ModelAdmin):
         "discount",
         "is_active",
         "is_available",
-        "main_image_preview",   # 👈 превью
+        "main_image_preview",
         "created_at",
     )
     list_filter = (
@@ -80,7 +96,7 @@ class ProductAdmin(admin.ModelAdmin):
     )
     search_fields = ("code", "name", "slug")
     list_editable = ("price", "promotion", "discount", "is_active", "is_available")
-    inlines = [ProductImageInline]
+    inlines = [ProductImageInline, CharacteristicsInline]
     prepopulated_fields = {"slug": ("name",)}
 
     readonly_fields = ("created_at", "updated_at")
@@ -104,3 +120,14 @@ class ProductAdmin(admin.ModelAdmin):
         return "—"
 
     main_image_preview.short_description = "Фото"
+
+
+@admin.register(CharacteristicsDict)
+class CharacteristicsDictAdmin(admin.ModelAdmin):
+    list_display = ("title_short", "unit")
+    search_fields = ("title", "unit")
+
+    def title_short(self, obj):
+        return obj.__str__()
+
+    title_short.short_description = "Название"

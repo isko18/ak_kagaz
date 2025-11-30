@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MaxValueValidator
 from mptt.models import MPTTModel, TreeForeignKey
+from django.template.defaultfilters import truncatechars  # 👈 добавь этот импорт
 from apps.utils import get_product_upload_path, rename_upload_file
 from imagekit.models import ProcessedImageField
 
@@ -159,5 +160,52 @@ class ProductImage(models.Model):
         return self.image.name
 
     def save(self, *args, **kwargs):
-        rename_upload_file(self.image)
+        if self.image:
+            rename_upload_file(self.image)
         super().save(*args, **kwargs)
+
+
+# ====== НОВОЕ: справочник характеристик и значения для товаров ======
+
+class CharacteristicsDict(models.Model):
+    class Meta:
+        verbose_name = "Описание характеристик"
+        verbose_name_plural = "Описание характеристик"
+
+    title = models.TextField(
+        verbose_name="Название",
+    )
+    unit = models.CharField(
+        max_length=255,
+        verbose_name="Единица измерения",
+        null=True,
+        blank=True,
+    )
+
+    def __str__(self):
+        return truncatechars(self.title, 30)
+
+
+class Characteristics(models.Model):
+    class Meta:
+        verbose_name_plural = "Характеристики"
+        verbose_name = "Характеристика"
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        verbose_name="Товар",
+        related_name="characteristics",
+    )
+    key = models.ForeignKey(
+        CharacteristicsDict,
+        on_delete=models.CASCADE,
+        verbose_name="Характеристика",
+        related_name="values",
+    )
+    value = models.TextField(
+        verbose_name="Значение",
+    )
+
+    def __str__(self):
+        return self.key.title

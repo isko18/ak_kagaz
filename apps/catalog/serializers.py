@@ -1,7 +1,12 @@
-# serializers.py
 from rest_framework import serializers
 
-from .models import Category, Product, ProductImage
+from .models import (
+    Category,
+    Product,
+    ProductImage,
+    Characteristics,
+    CharacteristicsDict,
+)
 
 
 # ==========================
@@ -70,6 +75,25 @@ class CategoryShortSerializer(serializers.ModelSerializer):
 
 
 # ==========================
+# Product: характеристики
+# ==========================
+class ProductCharacteristicSerializer(serializers.ModelSerializer):
+    key_id = serializers.IntegerField(source="key.id", read_only=True)
+    key_title = serializers.CharField(source="key.title", read_only=True)
+    key_unit = serializers.CharField(source="key.unit", read_only=True)
+
+    class Meta:
+        model = Characteristics
+        fields = (
+            "id",
+            "key_id",
+            "key_title",
+            "key_unit",
+            "value",
+        )
+
+
+# ==========================
 # Product: detail
 # ==========================
 class ProductDetailSerializer(serializers.ModelSerializer):
@@ -82,6 +106,10 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     images = ProductImageSerializer(many=True, read_only=True)
+    characteristics = ProductCharacteristicSerializer(
+        many=True,
+        read_only=True,
+    )
 
     class Meta:
         model = Product
@@ -102,6 +130,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "images",
+            "characteristics",
         )
         read_only_fields = ("created_at", "updated_at")
 
