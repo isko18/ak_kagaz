@@ -164,3 +164,40 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.MultiPartParser',
     ],
 }
+
+CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOW_CREDENTIALS = True  
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    'http://127.0.0.1:8000',
+    'https://ak-kagaz.webtm.ru',
+    "https://ak-kagaz.webtm.ru",
+]
+
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE   = "None"
+CSRF_COOKIE_SECURE     = True
+
+CORS_ORIGIN_WRITELIST = (
+    'http://localhost:3000',
+    'http://localhost:',
+    'https://ak-kagaz.webtm.ru'
+)
+
+CORS_ALLOW_HEADERS = (
+    'content-disposition', 'accept-encoding',
+    'content-type', 'accept', 'origin', 'Authorization', 'access-control-allow-methods',
+    'Access-Control-Allow-Origin'
+)
+
+CORS_ALLOW_METHODS = (
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+)
