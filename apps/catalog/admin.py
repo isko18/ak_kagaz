@@ -11,6 +11,10 @@ from .models import (
 )
 
 
+# =======================
+#   CATEGORY
+# =======================
+
 @admin.register(Category)
 class CategoryAdmin(DraggableMPTTAdmin):
     mptt_indent_field = "name"
@@ -27,7 +31,6 @@ class CategoryAdmin(DraggableMPTTAdmin):
     search_fields = ("name", "slug")
     list_filter = ("is_active",)
 
-    # важно: created_at/updated_at в readonly
     readonly_fields = ("image_preview", "created_at", "updated_at")
     prepopulated_fields = {"slug": ("name",)}
 
@@ -47,6 +50,10 @@ class CategoryAdmin(DraggableMPTTAdmin):
 
     image_preview.short_description = "Превью"
 
+
+# =======================
+#   INLINES
+# =======================
 
 class ProductImageInline(admin.TabularInline):
     model = ProductImage
@@ -71,8 +78,11 @@ class CharacteristicsInline(admin.TabularInline):
     extra = 1
     autocomplete_fields = ("key",)
     fields = ("key", "value")
-    # если хочешь запретить добавление/удаление здесь – можно переопределить has_add/has_delete
 
+
+# =======================
+#   PRODUCT
+# =======================
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
@@ -81,8 +91,11 @@ class ProductAdmin(admin.ModelAdmin):
         "name",
         "category",
         "price",
+        "wholesale_price",   # 🔹 добавили
+        "old_price",
         "promotion",
         "discount",
+        "quantity",          # 🔹 добавили
         "is_active",
         "is_available",
         "main_image_preview",
@@ -95,7 +108,16 @@ class ProductAdmin(admin.ModelAdmin):
         "category",
     )
     search_fields = ("code", "name", "slug")
-    list_editable = ("price", "promotion", "discount", "is_active", "is_available")
+    list_editable = (
+        "price",
+        "wholesale_price",   # 🔹 можно править прямо из списка
+        "old_price",
+        "promotion",
+        "discount",
+        "quantity",          # 🔹 тоже правится из списка
+        "is_active",
+        "is_available",
+    )
     inlines = [ProductImageInline, CharacteristicsInline]
     prepopulated_fields = {"slug": ("name",)}
 
@@ -103,8 +125,27 @@ class ProductAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (None, {"fields": ("code", "name", "slug", "category")}),
-        ("Цены", {"fields": ("price", "old_price", "discount", "promotion")}),
-        ("Статус", {"fields": ("is_active", "is_available")}),
+        (
+            "Цены",
+            {
+                "fields": (
+                    "price",
+                    "old_price",
+                    "wholesale_price",  # 🔹 здесь
+                    "discount",
+                    "promotion",
+                )
+            },
+        ),
+        (
+            "Склад",
+            {
+                "fields": (
+                    "quantity",         # 🔹 отдельный блок по складу
+                    "is_available",
+                )
+            },
+        ),
         ("Служебное", {"fields": ("created_at", "updated_at")}),
     )
 
@@ -122,6 +163,10 @@ class ProductAdmin(admin.ModelAdmin):
     main_image_preview.short_description = "Фото"
 
 
+# =======================
+#   CHARACTERISTICS DICT
+# =======================
+
 @admin.register(CharacteristicsDict)
 class CharacteristicsDictAdmin(admin.ModelAdmin):
     list_display = ("title_short", "unit")
@@ -131,3 +176,39 @@ class CharacteristicsDictAdmin(admin.ModelAdmin):
         return obj.__str__()
 
     title_short.short_description = "Название"
+
+
+# =======================
+#   CHARACTERISTICS
+# =======================
+
+@admin.register(Characteristics)
+class CharacteristicsAdmin(admin.ModelAdmin):
+    list_display = ("product", "key", "value")
+    search_fields = (
+        "product__name",
+        "product__code",
+        "key__title",
+        "value",
+    )
+    autocomplete_fields = ("product", "key")
+
+
+# =======================
+#   PRODUCT IMAGE
+# =======================
+
+@admin.register(ProductImage)
+class ProductImageAdmin(admin.ModelAdmin):
+    list_display = ("product", "image_preview")
+    search_fields = ("product__name", "product__code")
+    readonly_fields = ("image_preview",)
+
+    def image_preview(self, obj):
+        if obj.image and getattr(obj.image, "url", None):
+            return mark_safe(
+                f'<img src="{obj.image.url}" style="max-height:60px; border-radius:6px;" />'
+            )
+        return "—"
+
+    image_preview.short_description = "Превью"
