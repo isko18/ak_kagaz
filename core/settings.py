@@ -23,7 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-%n(s9q-^%58#b68ee5zo80jdm*keeqsk1@nwz=7dpxd4p8ap%('
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ["*"]
 
@@ -31,7 +31,7 @@ ALLOWED_HOSTS = ["*"]
 # Application definition
 
 INSTALLED_APPS = [
-    "jazzmin",
+#    "jazzmin",
     'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
