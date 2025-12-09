@@ -120,6 +120,10 @@ class Product(models.Model):
         default=False,
         verbose_name="Акция",
     )
+    quantity = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Количество на складе",
+    )
     is_active = models.BooleanField(
         verbose_name="Активный?",
         default=True,
