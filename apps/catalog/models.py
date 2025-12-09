@@ -104,6 +104,13 @@ class Product(models.Model):
         blank=True,
         verbose_name="Старая цена",
     )
+    wholesale_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Оптовая цена",
+    )
     discount = models.PositiveIntegerField(
         default=0,
         verbose_name="Скидка (%)",

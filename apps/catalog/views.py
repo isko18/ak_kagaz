@@ -20,8 +20,18 @@ from .serializers import (
 class ProductFilter(django_filters.FilterSet):
     category = django_filters.NumberFilter(field_name="category_id")
     category_in = django_filters.BaseInFilter(field_name="category_id")
+
     min_price = django_filters.NumberFilter(field_name="price", lookup_expr="gte")
     max_price = django_filters.NumberFilter(field_name="price", lookup_expr="lte")
+
+    # 👇 фильтры по оптовой цене
+    min_wholesale_price = django_filters.NumberFilter(
+        field_name="wholesale_price", lookup_expr="gte"
+    )
+    max_wholesale_price = django_filters.NumberFilter(
+        field_name="wholesale_price", lookup_expr="lte"
+    )
+
     promotion = django_filters.BooleanFilter(field_name="promotion")
     in_stock = django_filters.BooleanFilter(field_name="is_available")
 
@@ -45,8 +55,8 @@ class ProductPagination(PageNumberPagination):
 # ===== категории =====
 class CategoryViewSet(ReadOnlyModelViewSet):
     """
-    GET /categories/       -> список категорий (плоский)
-    GET /categories/tree/  -> дерево категорий
+    GET /categories/         -> список категорий (плоский)
+    GET /categories/tree/    -> дерево категорий
     GET /categories/{slug}/  -> детальная категория по slug
     """
 
@@ -55,7 +65,7 @@ class CategoryViewSet(ReadOnlyModelViewSet):
     filter_backends = [SearchFilter]
     search_fields = ("name", "slug")
 
-    # 👇 деталь по slug, а не по id
+    # деталь по slug, а не по id
     lookup_field = "slug"
     lookup_url_kwarg = "slug"
 
@@ -87,12 +97,13 @@ class ProductViewSet(ReadOnlyModelViewSet):
     ordering_fields = (
         "created_at",
         "price",
+        "wholesale_price",  # 👈 сортировка по опту тоже доступна
         "discount",
         "name",
     )
     ordering = ("-created_at",)
 
-    # 👇 ключевая часть: деталь по slug
+    # деталь по slug
     lookup_field = "slug"
     lookup_url_kwarg = "slug"
 
@@ -114,6 +125,7 @@ class ProductViewSet(ReadOnlyModelViewSet):
                 "name",
                 "slug",
                 "price",
+                "wholesale_price",  # 👈 поле оптовой цены явно берём
                 "old_price",
                 "discount",
                 "promotion",

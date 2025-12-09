@@ -25,6 +25,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "price",
+            "wholesale_price",  # 👈 оптовая цена
             "old_price",
             "discount",
             "promotion",
@@ -122,6 +123,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "category",
             "category_id",
             "price",
+            "wholesale_price",  # 👈 оптовая цена
             "old_price",
             "discount",
             "promotion",
