@@ -39,7 +39,7 @@ urlpatterns = [
 
 # ===== SPA fallback (React Router refresh) =====
 urlpatterns += [
-    re_path(r"^(?!api/|admin/|swagger/|redoc/|static/|media/).*$",
+    re_path(r"^(?!api/|admin/|static/|media/).*$",
             TemplateView.as_view(template_name="index.html")),
 ]
 
