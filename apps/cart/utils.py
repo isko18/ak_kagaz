@@ -10,8 +10,8 @@ def send_order_to_telegram(order: Order):
     Отправляет заказ в Telegram-бота.
     Нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в settings.
     """
-    token = getattr(settings, "TELEGRAM_BOT_TOKEN", None)
-    chat_id = getattr(settings, "TELEGRAM_CHAT_ID", None)
+    token = getattr(settings, "7777662800:AAEbl9bVH1ugtI3cUhINw4hxCldWWNiKlX8", None)
+    chat_id = getattr(settings, "5268023094", None)
 
     if not token or not chat_id:
         logger.warning("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not configured")
