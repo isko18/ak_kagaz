@@ -1,3 +1,4 @@
+# apps/catalog/admin.py
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 from mptt.admin import DraggableMPTTAdmin
@@ -9,7 +10,6 @@ from .models import (
     Characteristics,
     CharacteristicsDict,
 )
-
 
 # =======================
 #   CATEGORY
@@ -91,11 +91,11 @@ class ProductAdmin(admin.ModelAdmin):
         "name",
         "category",
         "price",
-        "wholesale_price",   # 🔹 добавили
+        "wholesale_price",
         "old_price",
         "promotion",
         "discount",
-        "quantity",          # 🔹 добавили
+        "quantity",
         "is_active",
         "is_available",
         "main_image_preview",
@@ -110,11 +110,11 @@ class ProductAdmin(admin.ModelAdmin):
     search_fields = ("code", "name", "slug")
     list_editable = (
         "price",
-        "wholesale_price",   # 🔹 можно править прямо из списка
+        "wholesale_price",
         "old_price",
         "promotion",
         "discount",
-        "quantity",          # 🔹 тоже правится из списка
+        "quantity",
         "is_active",
         "is_available",
     )
@@ -131,7 +131,7 @@ class ProductAdmin(admin.ModelAdmin):
                 "fields": (
                     "price",
                     "old_price",
-                    "wholesale_price",  # 🔹 здесь
+                    "wholesale_price",
                     "discount",
                     "promotion",
                 )
@@ -141,7 +141,7 @@ class ProductAdmin(admin.ModelAdmin):
             "Склад",
             {
                 "fields": (
-                    "quantity",         # 🔹 отдельный блок по складу
+                    "quantity",
                     "is_available",
                 )
             },
@@ -173,7 +173,7 @@ class CharacteristicsDictAdmin(admin.ModelAdmin):
     search_fields = ("title", "unit")
 
     def title_short(self, obj):
-        return obj.__str__()
+        return str(obj)
 
     title_short.short_description = "Название"
 
