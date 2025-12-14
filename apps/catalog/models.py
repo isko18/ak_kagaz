@@ -164,7 +164,8 @@ class ProductImage(models.Model):
     image = ProcessedImageField(
         upload_to=get_product_upload_path,
         verbose_name="Изображение",
-        options={"quality": 100},
+        format="WEBP",
+        options={"quality": 82},
     )
 
     def __str__(self) -> str:
