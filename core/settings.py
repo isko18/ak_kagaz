@@ -226,3 +226,6 @@ CRM_WEBHOOK_UPDATE_QUANTITY = True
 
 # Если NurCRM шлёт ссылки на изображения, можно скачивать и сохранять их в ProductImage.
 CRM_WEBHOOK_SYNC_IMAGES = True
+
+# Защита от слишком больших файлов
+CRM_WEBHOOK_MAX_IMAGE_BYTES = 10_000_000

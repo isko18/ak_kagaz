@@ -328,6 +328,10 @@ def sync_product_images(product, images_payload):
 
     item = {"images": images_payload or []}
     incoming_urls = _extract_image_urls(item)
+    max_bytes = int(getattr(settings, "CRM_WEBHOOK_MAX_IMAGE_BYTES", 10_000_000) or 10_000_000)
+
+    stats = {"added": 0, "deleted": 0, "skipped": 0, "failed": 0}
+    errors = []
 
     current_urls = set(
         ProductImage.objects
@@ -340,30 +344,81 @@ def sync_product_images(product, images_payload):
     # delete removed (only CRM-synced images)
     to_delete = current_urls - incoming_set
     if to_delete:
+        stats["deleted"] += len(to_delete)
         ProductImage.objects.filter(product=product, source_url__in=list(to_delete)).delete()
 
     # add new
     for idx, url in enumerate(incoming_urls):
         if url in current_urls:
+            stats["skipped"] += 1
             continue
         if not (url.startswith("http://") or url.startswith("https://")):
+            stats["failed"] += 1
+            errors.append({"url": url, "error": "unsupported scheme"})
             continue
         try:
-            resp = requests.get(url, timeout=12)
+            resp = requests.get(url, timeout=12, stream=True)
             if resp.status_code >= 400:
                 logger.warning("CRM image download failed: status=%s url=%s", resp.status_code, url)
+                stats["failed"] += 1
+                errors.append({"url": url, "error": f"http {resp.status_code}"})
                 continue
 
             content_type = (resp.headers.get("Content-Type") or "").lower()
             if content_type and not content_type.startswith("image/"):
                 logger.warning("CRM image has non-image content-type: %s url=%s", content_type, url)
+                stats["failed"] += 1
+                errors.append({"url": url, "error": f"content-type {content_type}"})
+                continue
+
+            content_length = resp.headers.get("Content-Length")
+            if content_length:
+                try:
+                    if int(content_length) > max_bytes:
+                        logger.warning("CRM image too large: bytes=%s url=%s", content_length, url)
+                        stats["failed"] += 1
+                        errors.append({"url": url, "error": "too large"})
+                        continue
+                except Exception:
+                    pass
+
+            chunks = []
+            total = 0
+            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > max_bytes:
+                    logger.warning("CRM image exceeded max bytes while streaming: url=%s", url)
+                    stats["failed"] += 1
+                    errors.append({"url": url, "error": "too large"})
+                    chunks = None
+                    break
+                chunks.append(chunk)
+            if chunks is None:
                 continue
 
             filename = _filename_from_url(url, fallback_name=f"{product.external_id or product.pk}-{idx}.img")
             pi = ProductImage(product=product, source_url=url)
-            pi.image.save(filename, ContentFile(resp.content), save=True)
+            pi.image.save(filename, ContentFile(b"".join(chunks)), save=True)
+            stats["added"] += 1
         except Exception:
             logger.exception("CRM image sync failed: url=%s product_id=%s", url, product.pk)
+            stats["failed"] += 1
+            errors.append({"url": url, "error": "exception"})
+
+    logger.info(
+        "CRM image sync done: product_id=%s external_id=%s urls=%s added=%s deleted=%s skipped=%s failed=%s",
+        product.pk,
+        getattr(product, "external_id", None),
+        len(incoming_urls),
+        stats["added"],
+        stats["deleted"],
+        stats["skipped"],
+        stats["failed"],
+    )
+
+    return stats, errors[:10]
 
 
 def _filename_from_url(url: str, fallback_name: str):
@@ -519,12 +574,14 @@ def _upsert_product_from_crm_item(item):
 
             created = False
 
+    image_stats = None
+    image_errors = []
     if bool(getattr(settings, "CRM_WEBHOOK_SYNC_IMAGES", True)):
         images_payload = item.get("images") or []
         if images_payload:
-            transaction.on_commit(lambda: sync_product_images(obj, images_payload))
+            image_stats, image_errors = sync_product_images(obj, images_payload)
 
-    return external_id, created, saved
+    return external_id, created, saved, image_stats, image_errors
 
 
 class CRMProductsWebhookAPIView(APIView):
@@ -561,16 +618,25 @@ class CRMProductsWebhookAPIView(APIView):
         updated_count = 0
         skipped_count = 0
         errors = []
+        images = {"added": 0, "deleted": 0, "skipped": 0, "failed": 0}
+        image_errors = []
 
         for idx, item in enumerate(items):
             try:
-                external_id, created, saved = _upsert_product_from_crm_item(item)
+                external_id, created, saved, image_stats, per_item_image_errors = _upsert_product_from_crm_item(item)
                 if created:
                     created_count += 1
                 elif saved:
                     updated_count += 1
                 else:
                     skipped_count += 1
+
+                if image_stats:
+                    for k in images.keys():
+                        images[k] += int(image_stats.get(k, 0) or 0)
+                if per_item_image_errors and len(image_errors) < 20:
+                    image_errors.extend(per_item_image_errors[: (20 - len(image_errors))])
+
                 logger.info(
                     "CRM webhook processed product: path=%s external_id=%s created=%s saved=%s",
                     request.path,
@@ -590,6 +656,8 @@ class CRMProductsWebhookAPIView(APIView):
                 "updated": updated_count,
                 "skipped": skipped_count,
                 "errors": errors,
+                "images": images,
+                "image_errors": image_errors,
             },
             status=status_code,
         )
