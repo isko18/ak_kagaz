@@ -216,6 +216,16 @@ def _to_decimal(v, default=Decimal("0")):
         return default
 
 
+def _to_int(v, default=0):
+    if v is None or v == "":
+        return default
+    try:
+        # handles "0.00", 0, Decimal("0.00"), etc.
+        return int(Decimal(str(v).replace(",", ".")))
+    except Exception:
+        return default
+
+
 def _safe_unique_slug(model, base_slug: str, slug_field="slug", max_len=512):
     base = (base_slug or "").strip()[:max_len] or "item"
     slug = base
@@ -236,6 +246,141 @@ def _to_uuid(v):
         return uuid.UUID(str(v))
     except Exception:
         return None
+
+
+def _extract_items(payload):
+    """
+    Поддерживаем разные форматы:
+    1) {"data": {...}} — точечный webhook
+    2) {"results": [{...}, ...]} — массовая выгрузка/страница
+    3) [{...}, ...] — список объектов
+    4) {...} — объект товара
+    """
+    if not payload:
+        return []
+
+    if isinstance(payload, dict) and "data" in payload and isinstance(payload.get("data"), dict):
+        return [payload["data"]]
+
+    if isinstance(payload, dict) and "results" in payload and isinstance(payload.get("results"), list):
+        return [x for x in payload["results"] if isinstance(x, dict)]
+
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+
+    if isinstance(payload, dict):
+        return [payload]
+
+    return []
+
+
+def _upsert_product_from_crm_item(item):
+    external_id_raw = item.get("id") or item.get("product_id") or item.get("external_id")
+    external_id = _to_uuid(external_id_raw)
+    if not external_id:
+        raise ValueError("Invalid or missing product id (id/product_id/external_id must be UUID)")
+
+    # 1) Категория (если прилетает)
+    category_obj = item.get("category")
+    category = None
+    if isinstance(category_obj, dict):
+        c_slug = (category_obj.get("slug") or "").strip()
+        c_name = (category_obj.get("name") or "").strip()
+        if not c_slug and c_name:
+            c_slug = slugify(c_name)[:255]
+        if c_slug:
+            category, _ = Category.objects.get_or_create(
+                slug=c_slug,
+                defaults={"name": c_name or c_slug, "is_active": True},
+            )
+        elif c_name:
+            gen_slug = _safe_unique_slug(Category, slugify(c_name)[:255])
+            category = Category.objects.create(name=c_name, slug=gen_slug, is_active=True)
+
+    elif isinstance(category_obj, str) and category_obj.strip():
+        c_name = category_obj.strip()
+        c_slug = slugify(c_name)[:255] or "category"
+        category, _ = Category.objects.get_or_create(
+            slug=c_slug,
+            defaults={"name": c_name, "is_active": True},
+        )
+
+    # 2) Поля товара (поддержка формата NurCRM)
+    name = (item.get("name") or "").strip()
+    code = (item.get("code") or "").strip()
+    barcode = (item.get("barcode") or "").strip()
+    description = item.get("description") or ""
+    price = _to_decimal(item.get("price"), default=Decimal("0"))
+
+    # NurCRM: discount_percent "0.00"
+    discount = _to_int(item.get("discount") or item.get("discount_percent"), default=0)
+
+    # NurCRM: quantity "0.00" (строка)
+    quantity = _to_int(item.get("quantity"), default=0)
+
+    promotion = bool(item.get("promotion") or False)
+    is_active = bool(item.get("is_active") if item.get("is_active") is not None else True)
+    is_available = bool(item.get("is_available") if item.get("is_available") is not None else True)
+
+    incoming_slug = (item.get("slug") or "").strip()
+    if not incoming_slug and name:
+        incoming_slug = slugify(name)[:512]
+
+    if not code:
+        code = str(external_id)
+
+    with transaction.atomic():
+        obj = Product.objects.filter(external_id=external_id).first()
+
+        if obj is None:
+            final_slug = incoming_slug or slugify(code)[:512] or "product"
+            if Product.objects.filter(slug=final_slug).exists():
+                final_slug = _safe_unique_slug(Product, final_slug, max_len=512)
+
+            final_code = code
+            if Product.objects.filter(code=final_code).exists():
+                final_code = str(external_id)
+
+            Product.objects.create(
+                external_id=external_id,
+                code=final_code,
+                name=name or final_code,
+                slug=final_slug,
+                category=category,
+                description=description,
+                price=price,
+                old_price=None,
+                wholesale_price=None,
+                discount=discount,
+                promotion=promotion,
+                quantity=quantity,
+                is_active=is_active,
+                is_available=is_available,
+            )
+            created = True
+        else:
+            obj.name = name or obj.name
+            obj.description = description
+
+            if code and code != obj.code and not Product.objects.exclude(pk=obj.pk).filter(code=code).exists():
+                obj.code = code
+
+            if incoming_slug and incoming_slug != obj.slug and not Product.objects.exclude(pk=obj.pk).filter(slug=incoming_slug).exists():
+                obj.slug = incoming_slug
+
+            obj.category = category or obj.category
+            obj.price = price
+            obj.old_price = None
+            obj.wholesale_price = None
+            obj.discount = discount
+            obj.promotion = promotion
+            obj.quantity = quantity
+            obj.is_active = is_active
+            obj.is_available = is_available
+            obj.save()
+            created = False
+
+    return external_id, created
 
 
 class CRMProductsWebhookAPIView(APIView):
@@ -259,140 +404,46 @@ class CRMProductsWebhookAPIView(APIView):
             logger.exception("CRM webhook failed to parse request body: path=%s", request.path)
             return Response({"detail": "Invalid payload"}, status=400)
 
-        data = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
-        if not isinstance(data, dict):
+        items = _extract_items(payload)
+        if not items:
             logger.warning(
-                "CRM webhook payload is not an object: path=%s type=%s",
+                "CRM webhook payload has no items: path=%s type=%s",
                 request.path,
-                type(data).__name__,
+                type(payload).__name__,
             )
-            return Response({"detail": "Payload must be an object"}, status=400)
+            return Response({"detail": "No items found in payload"}, status=400)
 
-        external_id_raw = data.get("id") or data.get("product_id") or data.get("external_id")
-        external_id = _to_uuid(external_id_raw)
-        if not external_id:
-            return Response(
-                {"detail": "Invalid or missing product id (id/product_id/external_id must be UUID)"},
-                status=400,
-            )
+        created_count = 0
+        updated_count = 0
+        errors = []
 
-        # 1) Категория (если прилетает)
-        # Поддержка разных форматов:
-        # category может быть строкой, или объектом {name, slug}, или {id, name, slug}
-        category_obj = data.get("category")
-        category = None
-        if isinstance(category_obj, dict):
-            c_slug = (category_obj.get("slug") or "").strip()
-            c_name = (category_obj.get("name") or "").strip()
-            if not c_slug and c_name:
-                c_slug = slugify(c_name)[:255]
-            if c_slug:
-                category, _ = Category.objects.get_or_create(
-                    slug=c_slug,
-                    defaults={"name": c_name or c_slug, "is_active": True},
+        for idx, item in enumerate(items):
+            try:
+                external_id, created = _upsert_product_from_crm_item(item)
+                if created:
+                    created_count += 1
+                else:
+                    updated_count += 1
+                logger.info(
+                    "CRM webhook processed product: path=%s external_id=%s created=%s",
+                    request.path,
+                    external_id,
+                    created,
                 )
-            elif c_name:
-                # если slug не смогли получить — создадим от имени
-                gen_slug = _safe_unique_slug(Category, slugify(c_name)[:255])
-                category = Category.objects.create(name=c_name, slug=gen_slug, is_active=True)
+            except Exception as e:
+                logger.exception("CRM webhook failed to process item #%s: path=%s", idx, request.path)
+                errors.append({"index": idx, "error": str(e)})
 
-        elif isinstance(category_obj, str) and category_obj.strip():
-            c_name = category_obj.strip()
-            c_slug = slugify(c_name)[:255] or "category"
-            category, _ = Category.objects.get_or_create(
-                slug=c_slug,
-                defaults={"name": c_name, "is_active": True},
-            )
-
-        # 2) Поля товара
-        name = (data.get("name") or "").strip()
-        code = (data.get("code") or "").strip()  # если в CRM есть code — используем
-        barcode = (data.get("barcode") or "").strip()
-        description = data.get("description") or ""
-        price = _to_decimal(data.get("price"), default=Decimal("0"))
-        old_price = _to_decimal(data.get("old_price"), default=None) if data.get("old_price") is not None else None
-        wholesale_price = _to_decimal(data.get("wholesale_price"), default=None) if data.get("wholesale_price") is not None else None
-        discount = int(data.get("discount") or 0)
-        promotion = bool(data.get("promotion") or False)
-        quantity = int(data.get("quantity") or 0)
-        is_active = bool(data.get("is_active") if data.get("is_active") is not None else True)
-        is_available = bool(data.get("is_available") if data.get("is_available") is not None else True)
-
-        # slug: берём из CRM если есть, иначе генерим
-        incoming_slug = (data.get("slug") or "").strip()
-        if not incoming_slug and name:
-            incoming_slug = slugify(name)[:512]
-
-        # ВАЖНО: твой сайт требует unique code+slug.
-        # Если CRM не даёт code — используем external_id как code (гарант уникальности).
-        if not code:
-            code = str(external_id)
-
-        with transaction.atomic():
-            # upsert по external_id
-            obj = Product.objects.filter(external_id=external_id).first()
-
-            if obj is None:
-                # slug может конфликтовать — делаем безопасный
-                final_slug = incoming_slug or slugify(code)[:512] or "product"
-                if Product.objects.filter(slug=final_slug).exists():
-                    final_slug = _safe_unique_slug(Product, final_slug, max_len=512)
-
-                # code тоже может конфликтовать со “старыми” товарами на сайте
-                final_code = code
-                if Product.objects.filter(code=final_code).exists():
-                    # если код конфликтует — делаем fallback на external_id
-                    final_code = str(external_id)
-
-                obj = Product.objects.create(
-                    external_id=external_id,
-                    code=final_code,
-                    name=name or final_code,
-                    slug=final_slug,
-                    category=category,
-                    description=description,
-                    price=price,
-                    old_price=old_price,
-                    wholesale_price=wholesale_price,
-                    discount=discount,
-                    promotion=promotion,
-                    quantity=quantity,
-                    is_active=is_active,
-                    is_available=is_available,
-                )
-                created = True
-            else:
-                # обновление
-                obj.name = name or obj.name
-                obj.description = description
-
-                # обновим code только если не конфликтует
-                if code and code != obj.code and not Product.objects.exclude(pk=obj.pk).filter(code=code).exists():
-                    obj.code = code
-
-                # обновим slug только если прилетел и не конфликтует
-                if incoming_slug and incoming_slug != obj.slug and not Product.objects.exclude(pk=obj.pk).filter(slug=incoming_slug).exists():
-                    obj.slug = incoming_slug
-
-                obj.category = category or obj.category
-                obj.price = price
-                obj.old_price = old_price
-                obj.wholesale_price = wholesale_price
-                obj.discount = discount
-                obj.promotion = promotion
-                obj.quantity = quantity
-                obj.is_active = is_active
-                obj.is_available = is_available
-                obj.save()
-                created = False
-
-        logger.info(
-            "CRM webhook processed product: path=%s external_id=%s created=%s",
-            request.path,
-            external_id,
-            created,
+        status_code = 200 if not errors else 207  # Multi-Status
+        return Response(
+            {
+                "ok": len(errors) == 0,
+                "created": created_count,
+                "updated": updated_count,
+                "errors": errors,
+            },
+            status=status_code,
         )
-        return Response({"ok": True, "created": created})
 
     def get(self, request, *args, **kwargs):
         return Response({"ok": True})
