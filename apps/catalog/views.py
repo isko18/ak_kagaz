@@ -243,6 +243,19 @@ def _safe_unique_slug(model, base_slug: str, slug_field="slug", max_len=512):
     return slug
 
 
+def _slug_or_hash(text: str, *, prefix: str, max_len: int = 255) -> str:
+    """
+    Django slugify() выкидывает кириллицу -> пустая строка.
+    Чтобы категории не превращались в один и тот же slug "category", делаем стабильный slug через hash.
+    """
+    txt = (text or "").strip()
+    s = slugify(txt)[:max_len]
+    if s:
+        return s
+    digest = hashlib.md5(txt.encode("utf-8")).hexdigest()[:12] if txt else uuid.uuid4().hex[:12]
+    return f"{prefix}-{digest}"[:max_len]
+
+
 def _to_uuid(v):
     if v is None or v == "":
         return None
@@ -444,10 +457,14 @@ def _upsert_product_from_crm_item(item):
     category_obj = item.get("category")
     category = None
     if isinstance(category_obj, dict):
-        c_slug = (category_obj.get("slug") or "").strip()
+        c_slug_raw = (category_obj.get("slug") or "").strip()
         c_name = (category_obj.get("name") or "").strip()
+        c_slug = slugify(c_slug_raw)[:255] if c_slug_raw else ""
         if not c_slug and c_name:
-            c_slug = slugify(c_name)[:255]
+            c_slug = _slug_or_hash(c_name, prefix="category", max_len=255)
+        if not c_slug and c_slug_raw:
+            c_slug = _slug_or_hash(c_slug_raw, prefix="category", max_len=255)
+
         if c_slug:
             category, _ = Category.objects.get_or_create(
                 slug=c_slug,
@@ -459,7 +476,7 @@ def _upsert_product_from_crm_item(item):
 
     elif isinstance(category_obj, str) and category_obj.strip():
         c_name = category_obj.strip()
-        c_slug = slugify(c_name)[:255] or "category"
+        c_slug = _slug_or_hash(c_name, prefix="category", max_len=255)
         category, _ = Category.objects.get_or_create(
             slug=c_slug,
             defaults={"name": c_name, "is_active": True},
