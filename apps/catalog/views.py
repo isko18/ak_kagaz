@@ -622,6 +622,16 @@ class CRMProductsWebhookAPIView(APIView):
             logger.exception("CRM webhook failed to parse request body: path=%s", request.path)
             return Response({"detail": "Invalid payload"}, status=400)
 
+        event = payload.get("event") if isinstance(payload, dict) else None
+        received_images_len = None
+        received_images_first = None
+        if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            imgs = payload["data"].get("images") or []
+            if isinstance(imgs, list):
+                received_images_len = len(imgs)
+                if imgs and isinstance(imgs[0], dict):
+                    received_images_first = (imgs[0].get("image_url") or imgs[0].get("image") or None)
+
         items = _extract_items(payload)
         if not items:
             logger.warning(
@@ -629,7 +639,10 @@ class CRMProductsWebhookAPIView(APIView):
                 request.path,
                 type(payload).__name__,
             )
-            return Response({"detail": "No items found in payload"}, status=400)
+            return Response(
+                {"detail": "No items found in payload", "event": event, "received_images_len": received_images_len},
+                status=400,
+            )
 
         created_count = 0
         updated_count = 0
@@ -675,6 +688,9 @@ class CRMProductsWebhookAPIView(APIView):
                 "errors": errors,
                 "images": images,
                 "image_errors": image_errors,
+                "event": event,
+                "received_images_len": received_images_len,
+                "received_images_first": received_images_first,
             },
             status=status_code,
         )
