@@ -310,37 +310,44 @@ def _extract_image_urls(item: dict):
     return result
 
 
-def _filename_from_url(url: str, fallback_name: str):
-    try:
-        path = urlparse(url).path or ""
-    except Exception:
-        path = ""
+def sync_product_images(product, images_payload):
+    """
+    images_payload (NurCRM):
+      [
+        {"image": "https://...", "image_url": "https://...", ...},
+        ...
+      ]
 
-    base = os.path.basename(path).strip() or fallback_name
-    base = base.replace("\\", "_").replace("/", "_").replace("..", ".")
-    if len(base) > 120:
-        base = base[-120:]
-    return base
-
-
-def _sync_product_images(product_id: int, external_id: uuid.UUID, image_urls):
-    if not image_urls:
+    Что делает:
+    - Скачивает новые изображения и сохраняет в ProductImage (ProcessedImageField -> WEBP)
+    - Не качает повторно (по source_url)
+    - Удаляет изображения, которые пропали в CRM (только те, у которых source_url заполнен)
+    """
+    if not product or getattr(product, "pk", None) is None:
         return
 
-    product = Product.objects.filter(pk=product_id).first()
-    if not product:
-        return
+    item = {"images": images_payload or []}
+    incoming_urls = _extract_image_urls(item)
 
-    for idx, url in enumerate(image_urls):
-        if not isinstance(url, str) or not url.strip():
+    current_urls = set(
+        ProductImage.objects
+        .filter(product=product)
+        .exclude(source_url="")
+        .values_list("source_url", flat=True)
+    )
+    incoming_set = set(incoming_urls)
+
+    # delete removed (only CRM-synced images)
+    to_delete = current_urls - incoming_set
+    if to_delete:
+        ProductImage.objects.filter(product=product, source_url__in=list(to_delete)).delete()
+
+    # add new
+    for idx, url in enumerate(incoming_urls):
+        if url in current_urls:
             continue
-        url = url.strip()
         if not (url.startswith("http://") or url.startswith("https://")):
             continue
-
-        if ProductImage.objects.filter(product=product, source_url=url).exists():
-            continue
-
         try:
             resp = requests.get(url, timeout=12)
             if resp.status_code >= 400:
@@ -352,12 +359,24 @@ def _sync_product_images(product_id: int, external_id: uuid.UUID, image_urls):
                 logger.warning("CRM image has non-image content-type: %s url=%s", content_type, url)
                 continue
 
-            filename = _filename_from_url(url, fallback_name=f"{external_id}-{idx}.img")
+            filename = _filename_from_url(url, fallback_name=f"{product.external_id or product.pk}-{idx}.img")
             pi = ProductImage(product=product, source_url=url)
             pi.image.save(filename, ContentFile(resp.content), save=True)
-
         except Exception:
-            logger.exception("CRM image sync failed: url=%s product_id=%s", url, product_id)
+            logger.exception("CRM image sync failed: url=%s product_id=%s", url, product.pk)
+
+
+def _filename_from_url(url: str, fallback_name: str):
+    try:
+        path = urlparse(url).path or ""
+    except Exception:
+        path = ""
+
+    base = os.path.basename(path).strip() or fallback_name
+    base = base.replace("\\", "_").replace("/", "_").replace("..", ".")
+    if len(base) > 120:
+        base = base[-120:]
+    return base
 
 
 def _upsert_product_from_crm_item(item):
@@ -429,7 +448,7 @@ def _upsert_product_from_crm_item(item):
             if Product.objects.filter(code=final_code).exists():
                 final_code = str(external_id)
 
-            Product.objects.create(
+            obj = Product.objects.create(
                 external_id=external_id,
                 code=final_code,
                 name=name or final_code,
@@ -501,9 +520,9 @@ def _upsert_product_from_crm_item(item):
             created = False
 
     if bool(getattr(settings, "CRM_WEBHOOK_SYNC_IMAGES", True)):
-        image_urls = _extract_image_urls(item)
-        if image_urls:
-            transaction.on_commit(lambda: _sync_product_images(obj.pk, external_id, image_urls))
+        images_payload = item.get("images") or []
+        if images_payload:
+            transaction.on_commit(lambda: sync_product_images(obj, images_payload))
 
     return external_id, created, saved
 
