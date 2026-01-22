@@ -185,3 +185,35 @@ class CategoryTreeSerializer(CategorySerializer):
     def get_children(self, obj):
         qs = obj.get_children()
         return CategoryTreeSerializer(qs, many=True, context=self.context).data
+
+
+# ==========================
+# Product: webhook (NurCRM-like minimal payload)
+# ==========================
+class ProductSerializer(serializers.ModelSerializer):
+    # NurCRM uses UUID id; in our DB it's stored in external_id
+    id = serializers.UUIDField(source="external_id")
+    category = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = (
+            "id",
+            "code",
+            "name",
+            "description",
+            "category",
+            "price",
+            "discount",
+            "promotion",
+            "quantity",
+            "is_active",
+            "is_available",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_category(self, obj):
+        if obj.category:
+            return obj.category.name
+        return None

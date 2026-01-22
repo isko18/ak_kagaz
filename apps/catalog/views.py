@@ -199,7 +199,8 @@ def _verify_signature(raw_body: bytes, signature: str) -> bool:
         return False
     their_hex = signature.split("=", 1)[1].strip()
 
-    secret = getattr(settings, "CRM_WEBHOOK_SECRET", "")
+    # NurCRM: secret is SITE_WEBHOOK_SECRET (keep fallback for older name)
+    secret = getattr(settings, "SITE_WEBHOOK_SECRET", "") or getattr(settings, "CRM_WEBHOOK_SECRET", "")
     if not secret:
         return False
 
@@ -329,6 +330,8 @@ def _upsert_product_from_crm_item(item):
     if not code:
         code = str(external_id)
 
+    webhook_update_quantity = bool(getattr(settings, "CRM_WEBHOOK_UPDATE_QUANTITY", True))
+
     with transaction.atomic():
         obj = Product.objects.filter(external_id=external_id).first()
 
@@ -349,38 +352,70 @@ def _upsert_product_from_crm_item(item):
                 category=category,
                 description=description,
                 price=price,
-                old_price=None,
-                wholesale_price=None,
                 discount=discount,
                 promotion=promotion,
-                quantity=quantity,
+                quantity=quantity if webhook_update_quantity else 0,
                 is_active=is_active,
                 is_available=is_available,
             )
             created = True
+            saved = True
         else:
-            obj.name = name or obj.name
-            obj.description = description
+            changed = False
+
+            if name and name != obj.name:
+                obj.name = name
+                changed = True
+
+            if description != obj.description:
+                obj.description = description
+                changed = True
 
             if code and code != obj.code and not Product.objects.exclude(pk=obj.pk).filter(code=code).exists():
                 obj.code = code
+                changed = True
 
             if incoming_slug and incoming_slug != obj.slug and not Product.objects.exclude(pk=obj.pk).filter(slug=incoming_slug).exists():
                 obj.slug = incoming_slug
+                changed = True
 
-            obj.category = category or obj.category
-            obj.price = price
-            obj.old_price = None
-            obj.wholesale_price = None
-            obj.discount = discount
-            obj.promotion = promotion
-            obj.quantity = quantity
-            obj.is_active = is_active
-            obj.is_available = is_available
-            obj.save()
+            if category and category != obj.category:
+                obj.category = category
+                changed = True
+
+            if price != obj.price:
+                obj.price = price
+                changed = True
+
+            if discount != obj.discount:
+                obj.discount = discount
+                changed = True
+
+            if promotion != obj.promotion:
+                obj.promotion = promotion
+                changed = True
+
+            if webhook_update_quantity and quantity != obj.quantity:
+                obj.quantity = quantity
+                changed = True
+
+            if is_active != obj.is_active:
+                obj.is_active = is_active
+                changed = True
+
+            if is_available != obj.is_available:
+                obj.is_available = is_available
+                changed = True
+
+            if changed:
+                obj.save()
+                saved = True
+            else:
+                saved = False
+
             created = False
 
-    return external_id, created
+    return external_id, created, saved
 
 
 class CRMProductsWebhookAPIView(APIView):
@@ -415,20 +450,24 @@ class CRMProductsWebhookAPIView(APIView):
 
         created_count = 0
         updated_count = 0
+        skipped_count = 0
         errors = []
 
         for idx, item in enumerate(items):
             try:
-                external_id, created = _upsert_product_from_crm_item(item)
+                external_id, created, saved = _upsert_product_from_crm_item(item)
                 if created:
                     created_count += 1
-                else:
+                elif saved:
                     updated_count += 1
+                else:
+                    skipped_count += 1
                 logger.info(
-                    "CRM webhook processed product: path=%s external_id=%s created=%s",
+                    "CRM webhook processed product: path=%s external_id=%s created=%s saved=%s",
                     request.path,
                     external_id,
                     created,
+                    saved,
                 )
             except Exception as e:
                 logger.exception("CRM webhook failed to process item #%s: path=%s", idx, request.path)
@@ -440,6 +479,7 @@ class CRMProductsWebhookAPIView(APIView):
                 "ok": len(errors) == 0,
                 "created": created_count,
                 "updated": updated_count,
+                "skipped": skipped_count,
                 "errors": errors,
             },
             status=status_code,
