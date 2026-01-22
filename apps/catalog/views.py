@@ -17,6 +17,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 import logging
 import uuid
+import os
+from urllib.parse import urlparse
+
+import requests
+from django.core.files.base import ContentFile
 
 from .models import Product, ProductImage, Category, Characteristics
 from .serializers import (
@@ -275,6 +280,86 @@ def _extract_items(payload):
     return []
 
 
+def _extract_image_urls(item: dict):
+    images = item.get("images")
+    if not images:
+        return []
+
+    urls = []
+    if isinstance(images, list):
+        for img in images:
+            if isinstance(img, str) and img.strip():
+                urls.append(img.strip())
+                continue
+            if isinstance(img, dict):
+                url = (img.get("image_url") or img.get("image") or "").strip()
+                if url:
+                    urls.append(url)
+    elif isinstance(images, dict):
+        url = (images.get("image_url") or images.get("image") or "").strip()
+        if url:
+            urls.append(url)
+
+    seen = set()
+    result = []
+    for u in urls:
+        if u in seen:
+            continue
+        seen.add(u)
+        result.append(u)
+    return result
+
+
+def _filename_from_url(url: str, fallback_name: str):
+    try:
+        path = urlparse(url).path or ""
+    except Exception:
+        path = ""
+
+    base = os.path.basename(path).strip() or fallback_name
+    base = base.replace("\\", "_").replace("/", "_").replace("..", ".")
+    if len(base) > 120:
+        base = base[-120:]
+    return base
+
+
+def _sync_product_images(product_id: int, external_id: uuid.UUID, image_urls):
+    if not image_urls:
+        return
+
+    product = Product.objects.filter(pk=product_id).first()
+    if not product:
+        return
+
+    for idx, url in enumerate(image_urls):
+        if not isinstance(url, str) or not url.strip():
+            continue
+        url = url.strip()
+        if not (url.startswith("http://") or url.startswith("https://")):
+            continue
+
+        if ProductImage.objects.filter(product=product, source_url=url).exists():
+            continue
+
+        try:
+            resp = requests.get(url, timeout=12)
+            if resp.status_code >= 400:
+                logger.warning("CRM image download failed: status=%s url=%s", resp.status_code, url)
+                continue
+
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+            if content_type and not content_type.startswith("image/"):
+                logger.warning("CRM image has non-image content-type: %s url=%s", content_type, url)
+                continue
+
+            filename = _filename_from_url(url, fallback_name=f"{external_id}-{idx}.img")
+            pi = ProductImage(product=product, source_url=url)
+            pi.image.save(filename, ContentFile(resp.content), save=True)
+
+        except Exception:
+            logger.exception("CRM image sync failed: url=%s product_id=%s", url, product_id)
+
+
 def _upsert_product_from_crm_item(item):
     external_id_raw = item.get("id") or item.get("product_id") or item.get("external_id")
     external_id = _to_uuid(external_id_raw)
@@ -414,6 +499,11 @@ def _upsert_product_from_crm_item(item):
                 saved = False
 
             created = False
+
+    if bool(getattr(settings, "CRM_WEBHOOK_SYNC_IMAGES", True)):
+        image_urls = _extract_image_urls(item)
+        if image_urls:
+            transaction.on_commit(lambda: _sync_product_images(obj.pk, external_id, image_urls))
 
     return external_id, created, saved
 

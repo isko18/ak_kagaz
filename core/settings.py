@@ -223,3 +223,6 @@ NURCRM_PRODUCTS_WEBHOOK_URL = ""
 # Если NurCRM шлёт webhook на каждое изменение остатков, а на сайте они не нужны —
 # поставь False, чтобы не писать в БД при изменениях quantity.
 CRM_WEBHOOK_UPDATE_QUANTITY = True
+
+# Если NurCRM шлёт ссылки на изображения, можно скачивать и сохранять их в ProductImage.
+CRM_WEBHOOK_SYNC_IMAGES = True

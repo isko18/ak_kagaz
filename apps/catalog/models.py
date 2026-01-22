@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.core.validators import MaxValueValidator
 from mptt.models import MPTTModel, TreeForeignKey
 from django.template.defaultfilters import truncatechars  # 👈 добавь этот импорт
@@ -161,12 +162,26 @@ class ProductImage(models.Model):
     class Meta:
         verbose_name_plural = "Изображения"
         verbose_name = "Изображение"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "source_url"],
+                condition=~Q(source_url=""),
+                name="uniq_productimage_product_source_url",
+            ),
+        ]
 
     product = models.ForeignKey(
         to=Product,
         on_delete=models.CASCADE,
         verbose_name="Товар",
         related_name="images",
+    )
+    source_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name="Source URL",
     )
     image = ProcessedImageField(
         upload_to=get_product_upload_path,
