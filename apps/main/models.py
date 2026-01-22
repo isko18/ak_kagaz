@@ -1,6 +1,6 @@
 from django.db import models
 from imagekit.models import ProcessedImageField
-
+import uuid
 
 class StaticPage(models.Model):
     class PageKey(models.TextChoices):
@@ -132,3 +132,26 @@ class News(models.Model):
 
     def __str__(self) -> str:
         return self.title
+    
+
+class ExternalProduct(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    external_id = models.UUIDField(unique=True, db_index=True)  # product.id из CRM
+    company_slug = models.SlugField(db_index=True, blank=True, default="")
+
+    name = models.CharField(max_length=255, blank=True, default="")
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    barcode = models.CharField(max_length=64, blank=True, default="")
+
+    raw_data = models.JSONField(default=dict, blank=True)
+    crm_updated_at = models.DateTimeField(null=True, blank=True)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["company_slug", "external_id"]),
+        ]
+
+    def __str__(self):
+        return self.name or str(self.external_id)

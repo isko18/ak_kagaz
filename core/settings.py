@@ -211,3 +211,6 @@ CORS_ALLOW_METHODS = (
 
 TELEGRAM_BOT_TOKEN = "7777662800:AAEbl9bVH1ugtI3cUhINw4hxCldWWNiKlX8"
 TELEGRAM_CHAT_ID = "5268023094"
+
+CRM_WEBHOOK_SECRET = "supersecret"
+CRM_WEBHOOK_URL = "https://ak-kagaz.webtm.ru/webhook/crm/"

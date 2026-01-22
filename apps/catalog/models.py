@@ -62,6 +62,13 @@ class Category(MPTTModel):
 
 
 class Product(models.Model):
+    external_id = models.UUIDField(
+        "ID товара в CRM",
+        unique=True,
+        db_index=True,
+        null=True,
+        blank=True,
+    )
     code = models.CharField(
         max_length=255,
         unique=True,
