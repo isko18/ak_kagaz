@@ -18,7 +18,7 @@ from rest_framework.response import Response
 import logging
 import uuid
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 from django.core.files.base import ContentFile
@@ -323,6 +323,28 @@ def _extract_image_urls(item: dict):
     return result
 
 
+def _normalize_image_url(url: str) -> str:
+    """
+    NurCRM может прислать:
+    - полный URL: https://app.nurcrm.kg/media/...
+    - относительный путь: /media/...
+    """
+    u = (url or "").strip()
+    if not u:
+        return ""
+
+    if u.startswith("//"):
+        return "https:" + u
+
+    if u.startswith("/"):
+        base = getattr(settings, "CRM_MEDIA_BASE_URL", "") or ""
+        if base:
+            return urljoin(base.rstrip("/") + "/", u.lstrip("/"))
+        return ""
+
+    return u
+
+
 def sync_product_images(product, images_payload):
     """
     images_payload (NurCRM):
@@ -366,6 +388,12 @@ def sync_product_images(product, images_payload):
 
     # add new
     for idx, url in enumerate(incoming_urls):
+        url = _normalize_image_url(url)
+        if not url:
+            stats["failed"] += 1
+            errors.append({"url": url, "error": "empty after normalize"})
+            continue
+
         if url in current_urls:
             stats["skipped"] += 1
             continue

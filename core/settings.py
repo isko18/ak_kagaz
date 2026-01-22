@@ -231,6 +231,10 @@ CRM_WEBHOOK_SYNC_IMAGES = True
 # Защита от слишком больших файлов
 CRM_WEBHOOK_MAX_IMAGE_BYTES = 10_000_000
 
+# NurCRM иногда присылает относительный путь вида "/media/...". Укажи базовый URL.
+# Пример: "https://app.nurcrm.kg"
+CRM_MEDIA_BASE_URL = os.environ.get("CRM_MEDIA_BASE_URL", "https://app.nurcrm.kg")
+
 # ===== logging (webhook) =====
 LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
