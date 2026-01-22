@@ -632,6 +632,31 @@ class CRMProductsWebhookAPIView(APIView):
                 if imgs and isinstance(imgs[0], dict):
                     received_images_first = (imgs[0].get("image_url") or imgs[0].get("image") or None)
 
+        logger.info(
+            "CRM webhook received: path=%s event=%s content_type=%s body_len=%s images_len=%s",
+            request.path,
+            event,
+            request.content_type,
+            len(raw),
+            received_images_len,
+        )
+
+        # NurCRM delete event: {"event":"product.deleted","data":{...}}
+        if event == "product.deleted" and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            item = payload["data"]
+            external_id = _to_uuid(item.get("id") or item.get("product_id") or item.get("external_id"))
+            if not external_id:
+                return Response({"detail": "Invalid or missing product id"}, status=400)
+
+            obj = Product.objects.filter(external_id=external_id).first()
+            if not obj:
+                return Response({"ok": True, "deleted": False, "reason": "not_found", "external_id": str(external_id)})
+
+            pk = obj.pk
+            obj.delete()
+            logger.info("CRM webhook deleted product: external_id=%s product_id=%s", external_id, pk)
+            return Response({"ok": True, "deleted": True, "external_id": str(external_id)})
+
         items = _extract_items(payload)
         if not items:
             logger.warning(

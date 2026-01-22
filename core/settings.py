@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -229,3 +230,29 @@ CRM_WEBHOOK_SYNC_IMAGES = True
 
 # Защита от слишком больших файлов
 CRM_WEBHOOK_MAX_IMAGE_BYTES = 10_000_000
+
+# ===== logging (webhook) =====
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "simple"},
+        "webhook_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "formatter": "simple",
+            "filename": str(LOG_DIR / "webhook.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 3,
+            "encoding": "utf-8",
+        },
+    },
+    "loggers": {
+        "apps.catalog.views": {"handlers": ["console", "webhook_file"], "level": "INFO"},
+    },
+}
