@@ -11,4 +11,5 @@ router.register(r"categories", CategoryViewSet, basename="category")
 urlpatterns = [
     path("", include(router.urls)),
     path("integrations/crm/products/", CRMProductsWebhookAPIView.as_view(), name="crm_products_webhook"),
+    path("integrations/crm/products", CRMProductsWebhookAPIView.as_view(), name="crm_products_webhook_noslash"),
 ]

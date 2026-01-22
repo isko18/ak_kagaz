@@ -8,6 +8,8 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
+from apps.catalog.views import CRMProductsWebhookAPIView
+
 schema_view = get_schema_view(
     openapi.Info(
         title="Ak-Kagaz API",
@@ -28,6 +30,11 @@ urlpatterns = [
     path("api/main/", include("apps.main.urls")),
     path("api/catalog/", include("apps.catalog.urls")),
     path("api/cart/", include("apps.cart.urls")),
+
+    # ===== integrations (aliases) =====
+    # Некоторые CRM/провайдеры не умеют хранить длинный URL вида /api/catalog/...
+    path("integrations/crm/products/", CRMProductsWebhookAPIView.as_view(), name="crm_products_webhook_root"),
+    path("integrations/crm/products", CRMProductsWebhookAPIView.as_view(), name="crm_products_webhook_root_noslash"),
 
     # ===== docs =====
     path("swagger/", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"),

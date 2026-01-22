@@ -15,6 +15,8 @@ from django.utils.text import slugify
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+import logging
+import uuid
 
 from .models import Product, ProductImage, Category, Characteristics
 from .serializers import (
@@ -23,6 +25,8 @@ from .serializers import (
     CategorySerializer,
     CategoryTreeSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ===== фильтрация товаров =====
@@ -223,6 +227,17 @@ def _safe_unique_slug(model, base_slug: str, slug_field="slug", max_len=512):
     return slug
 
 
+def _to_uuid(v):
+    if v is None or v == "":
+        return None
+    if isinstance(v, uuid.UUID):
+        return v
+    try:
+        return uuid.UUID(str(v))
+    except Exception:
+        return None
+
+
 class CRMProductsWebhookAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -230,14 +245,36 @@ class CRMProductsWebhookAPIView(APIView):
         raw = request.body or b""
         sig = request.headers.get("X-CRM-Signature", "")
         if not _verify_signature(raw, sig):
+            logger.warning(
+                "CRM webhook invalid signature: path=%s content_type=%s body_len=%s",
+                request.path,
+                request.content_type,
+                len(raw),
+            )
             return Response({"detail": "Invalid signature"}, status=401)
 
-        payload = request.data or {}
-        data = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
+        try:
+            payload = request.data or {}
+        except Exception:
+            logger.exception("CRM webhook failed to parse request body: path=%s", request.path)
+            return Response({"detail": "Invalid payload"}, status=400)
 
-        external_id = data.get("id") or data.get("product_id") or data.get("external_id")
+        data = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
+        if not isinstance(data, dict):
+            logger.warning(
+                "CRM webhook payload is not an object: path=%s type=%s",
+                request.path,
+                type(data).__name__,
+            )
+            return Response({"detail": "Payload must be an object"}, status=400)
+
+        external_id_raw = data.get("id") or data.get("product_id") or data.get("external_id")
+        external_id = _to_uuid(external_id_raw)
         if not external_id:
-            return Response({"detail": "Missing product id (id/product_id/external_id)"}, status=400)
+            return Response(
+                {"detail": "Invalid or missing product id (id/product_id/external_id must be UUID)"},
+                status=400,
+            )
 
         # 1) Категория (если прилетает)
         # Поддержка разных форматов:
@@ -349,4 +386,13 @@ class CRMProductsWebhookAPIView(APIView):
                 obj.save()
                 created = False
 
+        logger.info(
+            "CRM webhook processed product: path=%s external_id=%s created=%s",
+            request.path,
+            external_id,
+            created,
+        )
         return Response({"ok": True, "created": created})
+
+    def get(self, request, *args, **kwargs):
+        return Response({"ok": True})
