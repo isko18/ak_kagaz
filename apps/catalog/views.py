@@ -346,12 +346,16 @@ def sync_product_images(product, images_payload):
     stats = {"added": 0, "deleted": 0, "skipped": 0, "failed": 0}
     errors = []
 
-    current_urls = set(
-        ProductImage.objects
-        .filter(product=product)
-        .exclude(source_url="")
-        .values_list("source_url", flat=True)
-    )
+    try:
+        current_urls = set(
+            ProductImage.objects
+            .filter(product=product)
+            .exclude(source_url="")
+            .values_list("source_url", flat=True)
+        )
+    except Exception:
+        logger.exception("CRM image sync failed to load existing images: product_id=%s", product.pk)
+        return {"added": 0, "deleted": 0, "skipped": 0, "failed": 1}, [{"error": "db_error"}]
     incoming_set = set(incoming_urls)
 
     # delete removed (only CRM-synced images)
@@ -370,7 +374,12 @@ def sync_product_images(product, images_payload):
             errors.append({"url": url, "error": "unsupported scheme"})
             continue
         try:
-            resp = requests.get(url, timeout=12, stream=True)
+            resp = requests.get(
+                url,
+                timeout=12,
+                stream=True,
+                headers={"User-Agent": "Ak-KagazWebhook/1.0"},
+            )
             if resp.status_code >= 400:
                 logger.warning("CRM image download failed: status=%s url=%s", resp.status_code, url)
                 stats["failed"] += 1
@@ -415,10 +424,10 @@ def sync_product_images(product, images_payload):
             pi = ProductImage(product=product, source_url=url)
             pi.image.save(filename, ContentFile(b"".join(chunks)), save=True)
             stats["added"] += 1
-        except Exception:
+        except Exception as e:
             logger.exception("CRM image sync failed: url=%s product_id=%s", url, product.pk)
             stats["failed"] += 1
-            errors.append({"url": url, "error": "exception"})
+            errors.append({"url": url, "error": f"exception: {type(e).__name__}"})
 
     logger.info(
         "CRM image sync done: product_id=%s external_id=%s urls=%s added=%s deleted=%s skipped=%s failed=%s",
@@ -430,6 +439,8 @@ def sync_product_images(product, images_payload):
         stats["skipped"],
         stats["failed"],
     )
+    if errors:
+        logger.warning("CRM image sync errors (first): product_id=%s errors=%s", product.pk, errors[:3])
 
     return stats, errors[:10]
 
@@ -699,6 +710,13 @@ class CRMProductsWebhookAPIView(APIView):
                     created,
                     saved,
                 )
+                if per_item_image_errors:
+                    logger.warning(
+                        "CRM webhook image errors: path=%s external_id=%s errors=%s",
+                        request.path,
+                        external_id,
+                        per_item_image_errors[:3],
+                    )
             except Exception as e:
                 logger.exception("CRM webhook failed to process item #%s: path=%s", idx, request.path)
                 errors.append({"index": idx, "error": str(e)})

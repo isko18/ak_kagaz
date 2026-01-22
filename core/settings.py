@@ -213,13 +213,13 @@ CORS_ALLOW_METHODS = (
 TELEGRAM_BOT_TOKEN = "7777662800:AAEbl9bVH1ugtI3cUhINw4hxCldWWNiKlX8"
 TELEGRAM_CHAT_ID = "5268023094"
 
-SITE_WEBHOOK_SECRET = "supersecret"
+SITE_WEBHOOK_SECRET = os.environ.get("SITE_WEBHOOK_SECRET", "supersecret")
 # Backward-compat (older code used CRM_WEBHOOK_SECRET)
 CRM_WEBHOOK_SECRET = SITE_WEBHOOK_SECRET
 
 # Куда отправлять вебхуки о товарах (create/update/delete) из этого сайта.
 # Пример: "https://app.nurcrm.kg/api/.../webhook/"
-NURCRM_PRODUCTS_WEBHOOK_URL = ""
+NURCRM_PRODUCTS_WEBHOOK_URL = os.environ.get("NURCRM_PRODUCTS_WEBHOOK_URL", "")
 
 # Если NurCRM шлёт webhook на каждое изменение остатков, а на сайте они не нужны —
 # поставь False, чтобы не писать в БД при изменениях quantity.
