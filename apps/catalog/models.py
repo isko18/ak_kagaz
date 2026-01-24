@@ -126,7 +126,7 @@ class Product(models.Model):
     )
     promotion = models.BooleanField(
         default=False,
-        verbose_name="Акция",
+        verbose_name="Сезонные товары",
     )
     quantity = models.PositiveIntegerField(
         default=0,
